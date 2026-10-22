@@ -1,0 +1,5 @@
+interface:
+  display_name: "VideoFreeLearn"
+  short_description: "Русские видео и медитации для FreeLearn"
+  brand_color: "#2C6383"
+  default_prompt: "Используй $videofreelearn для подготовки сценария видео FreeLearn."
