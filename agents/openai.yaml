@@ -1,5 +1,5 @@
 interface:
-  display_name: "VideoFreeLearn"
-  short_description: "Русские видео и медитации для FreeLearn"
+  display_name: "Создание видео"
+  short_description: "Русские видео с озвучкой: уроки и медитации"
   brand_color: "#2C6383"
-  default_prompt: "Используй $videofreelearn для подготовки сценария видео FreeLearn."
+  default_prompt: "Используй $sozdanie-video, чтобы подготовить видео с озвучкой."

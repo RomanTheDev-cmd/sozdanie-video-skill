@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VideoFreeLearn entrypoint for an existing shared local engine; no runtime copies."""
+"""Entrypoint of the skill «Создание видео» (formerly VideoFreeLearn) for the existing shared local engine; no runtime copies."""
 import argparse
 import json
 import os
@@ -40,13 +40,13 @@ def main(argv=None):
     if args.mode!='build' and (args.allow_render or rest):parser.error('Этот режим не принимает параметры рендера')
     if args.mode=='build' and not rest:parser.error('Укажите JSON-сценарий и параметры заказанного экспорта')
     if args.mode in ('check-entrypoint','check'):
-        print('VideoFreeLearn: проверки интерфейса',flush=True)
+        print('Создание видео: проверки навыка',flush=True)
         tests=Path(__file__).resolve().with_name('check_entrypoint.py')
         result=subprocess.run([sys.executable,str(tests)],check=False,env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'}).returncode
         if result or args.mode=='check-entrypoint':return result
     engine=resolve_engine();runtime=runtime_root()
     if args.mode=='status':
-        result={'interface':'VideoFreeLearn','interface_version':(Path(__file__).resolve().parents[1]/'VERSION').read_text().strip(),'engine_root':str(engine),'engine_version':(engine/'VERSION').read_text().strip(),'runtime':str(runtime),'python_available':{env:(runtime/env/'bin/python').is_file() for env in ['.venv','.venv-audio','.venv-qwen']},'render_started':False,'voice_synthesis_started':False,'limits':['Path/version inventory is not rendering or listening assessment.']}
+        result={'interface':'Создание видео','interface_version':(Path(__file__).resolve().parents[1]/'VERSION').read_text().strip(),'engine_root':str(engine),'engine_version':(engine/'VERSION').read_text().strip(),'runtime':str(runtime),'python_available':{env:(runtime/env/'bin/python').is_file() for env in ['.venv','.venv-audio','.venv-qwen']},'render_started':False,'voice_synthesis_started':False,'limits':['Path/version inventory is not rendering or listening assessment.']}
         print(json.dumps(result,ensure_ascii=False,indent=2));return 0
     environment='.venv-audio' if args.mode=='check-audio' else '.venv'
     python=runtime/environment/'bin/python'

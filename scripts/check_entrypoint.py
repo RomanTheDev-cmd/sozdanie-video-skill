@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -14,6 +15,8 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
+ACUTE = '\u0301'
+VOWELS = set('аеёиоуыэюя')
 spec = importlib.util.spec_from_file_location('video_entry', ROOT/'scripts/engine.py')
 entry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(entry)
@@ -89,7 +92,7 @@ class EntryChecks(unittest.TestCase):
 
     def test_default_is_status(self):
         code, process, output = self.invoke([])
-        self.assertEqual(json.loads(output)['interface'], 'VideoFreeLearn')
+        self.assertEqual(json.loads(output)['interface'], 'Создание видео')
         process.assert_not_called()
         self.assertEqual(code, 0)
 
@@ -159,6 +162,47 @@ class EntryChecks(unittest.TestCase):
         self.assertNotIn('shell', process.call_args.kwargs)
         self.assertEqual(process.call_args.kwargs['env']['PYTHONDONTWRITEBYTECODE'], '1')
 
+
+    def test_skill_card_uses_new_name(self):
+        text = (ROOT/'SKILL.md').read_text(encoding='utf-8')
+        head = text.split('---')[1]
+        self.assertRegex(head, r'(?m)^name: sozdanie-video$')
+        description = re.search(r'(?m)^description: (.+)$', head).group(1)
+        self.assertIn('Создание видео', description)
+        self.assertIn('VideoFreeLearn', description)  # old trigger still finds the skill
+        self.assertIn('display_name: "Создание видео"', (ROOT/'agents/openai.yaml').read_text(encoding='utf-8'))
+        for name in re.findall(r'`references/([^`]+)`', text):
+            with self.subTest(reference=name):
+                self.assertTrue((ROOT/'references'/name).is_file())
+
+    def test_lexicon_shape(self):
+        data = json.loads((ROOT/'references/proiznoshenie.json').read_text(encoding='utf-8'))
+        self.assertEqual(data['format'], 1)
+        seen = set()
+        for item in data['entries']:
+            with self.subTest(written=item.get('written')):
+                self.assertTrue({'written', 'say', 'kind', 'date', 'source', 'note'} <= set(item))
+                self.assertIn(item['kind'], {'произношение', 'замена слова'})
+                self.assertRegex(item['date'], r'^\d{4}-\d{2}-\d{2}$')
+                self.assertNotIn(ACUTE, item['written'])
+                self.assertNotIn(item['written'].lower(), seen)
+                seen.add(item['written'].lower())
+                # The voice reads Russian: Cyrillic, spaces, hyphens and the combining acute only.
+                self.assertRegex(item['say'], '^[А-Яа-яЁё \\-' + ACUTE + ']+$')
+                for word in re.split(r'[ -]', item['say']):
+                    self.assertLessEqual(word.count(ACUTE), 1)
+                    for i, char in enumerate(word):
+                        if char == ACUTE:
+                            self.assertIn(word[i-1].lower(), VOWELS)
+
+    def test_lexicon_keeps_latest_corrections(self):
+        say = {i['written']: i['say'] for i in json.loads((ROOT/'references/proiznoshenie.json').read_text(encoding='utf-8'))['entries']}
+        expected = {'PLA': 'пээла́', 'TPU': 'тэпэу́', 'AMS': 'аэмэ́с', 'ASA': 'А́са', 'Y (ось)': 'и́грик',
+                    'дрыгостол': 'дрыгосто́л', 'дрыгостолы': 'дрыги', 'хотэнд': 'хотэ́нд', 'постепенно': 'постепе́нно',
+                    'Bambu Lab A1': 'Бамбу Лаб а-оди́н', 'ИИ': 'И И'}
+        for written, value in expected.items():
+            with self.subTest(written=written):
+                self.assertEqual(say.get(written), value)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
