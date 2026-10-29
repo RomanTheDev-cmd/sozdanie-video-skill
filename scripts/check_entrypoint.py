@@ -264,5 +264,18 @@ class EntryChecks(unittest.TestCase):
         errors, _ = self.scenario([{'narration': 'В этом видео говорим о печати нитью.', 'tts_text': 'В э́том ви́део говори́м о печа́ти ни́тью.'}])
         self.assertTrue(any('говорим о печати нитью' in e for e in errors))
 
+    def test_tts_check_adverb_entry_ignores_adjective(self):
+        errors, _ = self.scenario([{'narration': 'Постепенная калибровка стола.', 'tts_text': 'Постепе́нная калибро́вка стола́.'}])
+        self.assertEqual(errors, [])
+        errors, _ = self.scenario([{'narration': 'Увеличивайте постепенно.', 'tts_text': 'Увели́чивайте посте́пенно.'}])
+        self.assertTrue(errors)
+
+    def test_tts_check_refuses_file_without_lines(self):
+        path = self.home/'other.json'
+        path.write_text(json.dumps({'scenes': [{'text': 'PLA', 'speech': 'пэ-эл-а'}]}), encoding='utf-8')
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(checker.main([str(path)]), 2)
+        self.assertIn('narration', err.getvalue())
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

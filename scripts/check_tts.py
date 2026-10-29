@@ -53,9 +53,10 @@ def pattern(key):
     """Abbreviations and Latin names match case-sensitively as whole words; Russian words also match their endings."""
     if key.upper() == key or re.search(r'[A-Za-z0-9]', key):
         return re.compile(r'(?<!' + LETTER + ')' + re.escape(key) + r'(?!' + LETTER + ')')
-    stem = key[:-1] if ' ' not in key and key[-1] in 'аяоеыи' else key
-    tail = r'\w*' if ' ' not in key else ''
-    return re.compile(r'(?<!' + LETTER + ')' + re.escape(stem) + tail + r'(?!' + LETTER + ')', re.IGNORECASE)
+    # A word ending in a consonant (дрыгостол, хотэнд) also matches its case forms; a word ending in a vowel
+    # (постепенно) or a phrase matches only as written, so «постепенная» is not taken for «постепенно».
+    tail = r'\w*' if ' ' not in key and key[-1].lower() not in 'аяоеёыиуюэ' else ''
+    return re.compile(r'(?<!' + LETTER + ')' + re.escape(key) + tail + r'(?!' + LETTER + ')', re.IGNORECASE)
 
 
 def forbidden(form, spoken):
@@ -114,7 +115,10 @@ def check_text(where, shown, spoken, lexicon):
 
 def check_file(path, lexicon):
     errors, warnings = [], []
-    for where, shown, spoken in rows(json.loads(Path(path).read_text(encoding='utf-8'))):
+    lines = list(rows(json.loads(Path(path).read_text(encoding='utf-8'))))
+    if not lines:
+        raise ValueError('не найдено ни одной реплики с полем narration — проверять нечего')
+    for where, shown, spoken in lines:
         e, w = check_text(where, shown, spoken, lexicon)
         errors += e
         warnings += w
