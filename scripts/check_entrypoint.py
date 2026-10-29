@@ -20,6 +20,9 @@ VOWELS = set('аеёиоуыэюя')
 spec = importlib.util.spec_from_file_location('video_entry', ROOT/'scripts/engine.py')
 entry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(entry)
+lister_spec = importlib.util.spec_from_file_location('lexicon_list', ROOT/'scripts/lexicon_list.py')
+lister = importlib.util.module_from_spec(lister_spec)
+lister_spec.loader.exec_module(lister)
 
 
 class EntryChecks(unittest.TestCase):
@@ -181,7 +184,8 @@ class EntryChecks(unittest.TestCase):
         seen = set()
         for item in data['entries']:
             with self.subTest(written=item.get('written')):
-                self.assertTrue({'written', 'say', 'kind', 'date', 'source', 'note'} <= set(item))
+                self.assertTrue({'written', 'say', 'kind', 'date', 'source', 'note', 'group'} <= set(item))
+                self.assertIn(item['group'], lister.GROUPS)
                 self.assertIn(item['kind'], {'произношение', 'замена слова'})
                 self.assertRegex(item['date'], r'^\d{4}-\d{2}-\d{2}$')
                 self.assertNotIn(ACUTE, item['written'])
@@ -203,6 +207,12 @@ class EntryChecks(unittest.TestCase):
         for written, value in expected.items():
             with self.subTest(written=written):
                 self.assertEqual(say.get(written), value)
+
+    def test_readable_list_matches_lexicon(self):
+        data = json.loads((ROOT/'references/proiznoshenie.json').read_text(encoding='utf-8'))
+        self.assertEqual((ROOT/'references/spisok-udareniy.md').read_text(encoding='utf-8'), lister.render(data))
+        roman = [e for e in data['entries'] if e['group'] == 'Правки Романа']
+        self.assertTrue(roman and all(e['source'] == 'Роман' for e in roman))
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
