@@ -23,6 +23,9 @@ spec.loader.exec_module(entry)
 lister_spec = importlib.util.spec_from_file_location('lexicon_list', ROOT/'scripts/lexicon_list.py')
 lister = importlib.util.module_from_spec(lister_spec)
 lister_spec.loader.exec_module(lister)
+checker_spec = importlib.util.spec_from_file_location('check_tts', ROOT/'scripts/check_tts.py')
+checker = importlib.util.module_from_spec(checker_spec)
+checker_spec.loader.exec_module(checker)
 
 
 class EntryChecks(unittest.TestCase):
@@ -186,6 +189,8 @@ class EntryChecks(unittest.TestCase):
             with self.subTest(written=item.get('written')):
                 self.assertTrue({'written', 'say', 'kind', 'date', 'source', 'note', 'group'} <= set(item))
                 self.assertIn(item['group'], lister.GROUPS)
+                if item['kind'] == 'замена слова':
+                    self.assertTrue(item.get('forms'))  # the check needs the exact word forms to replace
                 self.assertIn(item['kind'], {'произношение', 'замена слова'})
                 self.assertRegex(item['date'], r'^\d{4}-\d{2}-\d{2}$')
                 self.assertNotIn(ACUTE, item['written'])
@@ -193,6 +198,8 @@ class EntryChecks(unittest.TestCase):
                 seen.add(item['written'].lower())
                 # The voice reads Russian: Cyrillic, spaces, hyphens and the combining acute only.
                 self.assertRegex(item['say'], '^[А-Яа-яЁё \\-' + ACUTE + ']+$')
+                for form in item.get('avoid', []):
+                    self.assertRegex(form, '^[А-Яа-яЁё \\-' + ACUTE + ']+$')
                 for word in re.split(r'[ -]', item['say']):
                     self.assertLessEqual(word.count(ACUTE), 1)
                     for i, char in enumerate(word):
@@ -213,6 +220,49 @@ class EntryChecks(unittest.TestCase):
         self.assertEqual((ROOT/'references/spisok-udareniy.md').read_text(encoding='utf-8'), lister.render(data))
         roman = [e for e in data['entries'] if e['group'] == 'Правки Романа']
         self.assertTrue(roman and all(e['source'] == 'Роман' for e in roman))
+
+    def test_status_reports_stale_engine_pointer(self):
+        _, _, output = self.invoke(['status'])
+        self.assertFalse(json.loads(output)['engine_points_to_skill'])
+        (self.engine/'ENGINE.md').write_text('Вход — навык «Создание видео» (`~/.codex/skills/sozdanie-video`).', encoding='utf-8')
+        _, _, output = self.invoke(['status'])
+        self.assertTrue(json.loads(output)['engine_points_to_skill'])
+
+    def scenario(self, rows):
+        path = self.home/'scenario.json'
+        path.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
+        return checker.check_file(path, checker.load_lexicon())
+
+    def test_tts_check_catches_repeated_mistakes(self):
+        errors, _ = self.scenario([{'narration': 'Для начала хватит PLA. Bambu Lab A1 mini — дрыгостол, такие дрыгостолы постепенно стали популярны. AMS меняет пластик, головка движется по оси Y.',
+                                    'tts_text': 'Для начала хватит пэ-эл-а. Бамбу А один мини — дры́гостол, такие дрыгостолы посте́пенно стали популярны. Эйэмэс меняет пластик, головка движется по оси игрек.'}])
+        text = '\n'.join(errors)
+        for word in ['PLA', 'дрыгостол', 'дрыгостолы', 'постепенно', 'AMS', 'головка', 'Y', 'Bambu Lab A1', 'для начала']:
+            with self.subTest(word=word):
+                self.assertIn('«' + word, text)
+
+    def test_tts_check_accepts_roman_forms(self):
+        errors, _ = self.scenario([{'narration': 'Для начала хватит PLA. Bambu Lab A1 mini — это дрыгостол; такие дрыги постепенно стали популярны. AMS меняет пластик, а хотэнд его плавит. Голова принтера движется по оси Y. С вами был ИИ-ассистент.',
+                                    'tts_text': 'Для нача́ла хва́тит пээла́. Бамбу Лаб а-оди́н ми́ни — э́то дрыгосто́л; таки́е дрыги постепе́нно ста́ли популя́рны. Аэмэ́с меня́ет пла́стик, а хотэ́нд его́ пла́вит. Голова́ при́нтера дви́жется по оси́ и́грик. С ва́ми был И И ассисте́нт.'}])
+        self.assertEqual(errors, [])
+
+    def test_tts_check_forbidden_form_without_subtitle_word(self):
+        errors, _ = self.scenario({'scenes': [{'narration': 'Система меняет нить.', 'tts_text': 'Эйэмэс меняет нить.'}]})
+        self.assertTrue(any('эйэмэс' in e for e in errors))
+
+    def test_tts_check_engine_format_russian_prose_passes(self):
+        errors, _ = self.scenario({'scenes': [{'narration': 'Сядьте удобно и постепенно отпустите напряжение.', 'caption': 'Дыхание'}]})
+        self.assertEqual(errors, [])
+
+    def test_tts_check_accepts_spelling_and_punctuation_variants(self):
+        # Roman gave no stress for PETG/ABS; Codex wrote «пэтджи́», «абээ́с»; «И. И,» is the separate letters he asked for.
+        errors, _ = self.scenario([{'narration': 'PETG и ABS. Технологии — печать нитью и смолой. В этом видео говорим об FDM-печати. С вами был ИИ-ассистент 3D Magic.',
+                                    'tts_text': 'Пэтджи́ и абээ́с. Техноло́гии — печа́ть ни́тью и смоло́й. В э́том ви́део говори́м об эфдээм-печа́ти. С ва́ми был И. И, ассисте́нт три дэ мэ́джик.'}])
+        self.assertEqual(errors, [])
+
+    def test_tts_check_rejected_phrase_about_fdm(self):
+        errors, _ = self.scenario([{'narration': 'В этом видео говорим о печати нитью.', 'tts_text': 'В э́том ви́део говори́м о печа́ти ни́тью.'}])
+        self.assertTrue(any('говорим о печати нитью' in e for e in errors))
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

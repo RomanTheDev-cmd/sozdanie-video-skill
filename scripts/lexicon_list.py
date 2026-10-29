@@ -37,7 +37,8 @@ def render(data):
             continue
         lines += ['## ' + group, '', INTRO[group], '', '| Как пишется | Как читать | Примечание |', '|---|---|---|']
         for e in sorted(items, key=lambda e: e['written'].lower()) if group != 'Правки Романа' else items:
-            note = '. '.join(x for x in [e['note'], 'Замена слова: меняет и субтитры' if e['kind'] == 'замена слова' else ''] if x)
+            note = '. '.join(x for x in [e['note'], 'Замена слова: меняет и субтитры' if e['kind'] == 'замена слова' else '',
+                                         'Запрещено: ' + ', '.join(e['avoid']) if e.get('avoid') else ''] if x)
             lines.append('| ' + cell(e['written']) + ' | ' + cell(e['say']) + ' | ' + cell(note) + ' |')
         lines.append('')
     return '\n'.join(lines)
