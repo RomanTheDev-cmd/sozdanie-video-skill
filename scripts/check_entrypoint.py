@@ -246,6 +246,91 @@ class EntryChecks(unittest.TestCase):
                                     'tts_text': 'Для нача́ла хва́тит пээла́. Бамбу Лаб а-оди́н ми́ни — э́то дрыгосто́л; таки́е дрыги постепе́нно ста́ли популя́рны. Аэмэ́с меня́ет пла́стик, а хотэ́нд его́ пла́вит. Голова́ при́нтера дви́жется по оси́ и́грик. С ва́ми был И И ассисте́нт.'}])
         self.assertEqual(errors, [])
 
+    QWEN_LEXICON = [dict(written='хотэнд', say='хотэ́нд', kind='произношение', group='Правки Романа', note='', source='Роман', qwen='хотэнд', qwen_heard_ok='Роман, 2026-10-29'),
+                    dict(written='AMS', say='аэмэ́с', kind='произношение', group='Правки Романа', note='', source='Роман', qwen='аэмэс'),
+                    dict(written='дрыгостол', say='дрыгосто́л', kind='произношение', group='Правки Романа', note='', source='Роман'),
+                    dict(written='сопло', say='сопло́', kind='произношение', group='3D-печать: слова', note='', source='Claude')]
+
+    def test_qwen_check_lists_roman_terms_not_heard_by_him(self):
+        # Qwen ignores stress marks and Whisper can't hear stress: only Roman's ear approves a spelling (2026-10-29).
+        path = self.home/'scenario.json'
+        path.write_text(json.dumps([{'narration': 'AMS и хотэнд. Такие дрыгостолы. Сопло.'}], ensure_ascii=False), encoding='utf-8')
+        found = checker.unheard_for_qwen(path, self.QWEN_LEXICON)
+        self.assertEqual(sorted(found), ['AMS', 'дрыгостол'])
+        self.assertEqual(found['AMS']['qwen'], 'аэмэс')
+
+    def test_qwen_flag_stops_synthesis_until_roman_has_heard(self):
+        path = self.home/'scenario.json'
+        path.write_text(json.dumps([{'narration': 'AMS и хотэнд.', 'tts_text': 'Аэмэ́с и хотэ́нд.'}], ensure_ascii=False), encoding='utf-8')
+        with patch.object(checker, 'load_lexicon', return_value=self.QWEN_LEXICON):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(checker.main(['--qwen', str(path)]), 3)
+            self.assertIn('AMS', out.getvalue()); self.assertIn('qwen_sample.py', out.getvalue())
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(checker.main([str(path)]), 0)
+
+    def test_qwen_text_comes_from_the_lexicon(self):
+        # Spellings Roman chose by ear live in the lexicon, not in a project script, so any agent gets them.
+        spec = importlib.util.spec_from_file_location('qwen_text', ROOT/'scripts/qwen_text.py')
+        qt = importlib.util.module_from_spec(spec); spec.loader.exec_module(qt)
+        A = ACUTE
+        cases = [(f'Тэпэу{A} — ги{A}бкий пла{A}стик.', f'Тэпэу{A}у — гибкий пластик.'),
+                 (f'Приме{A}ры: бамбу лаб а-оди{A}н ми{A}ни, а-оди{A}н и{A}ли а-два-эл.', 'Примеры: бамбу лаб аодинмини, аодин или адваэл.'),
+                 (f'Ме́жду аэмэ{A}с и тулче{A}нджером.', 'Между аэмéс и тулчéнджером.'),
+                 (f'Для пэтджи{A} и пээла{A}', 'Для петджи и пээлá'),
+                 ('и и всё', 'И и всё'),   # «И И» (ИИ) — только как написано, не «и и» в обычной речи
+                 (f'Так устро{A}ен бэдсли{A}нгер, он же дры{A}га. хотэ{A}нд плавит.', 'Так устроен бэдслíнгер, он же дрыга. Хотэнд плавит.'),
+                 (f'С ва{A}ми был эйа{A}й ассисте{A}нт три-дэ мэ{A}джик.', 'С вами был эйай ассистент три дэ мэджик.')]
+        for given, expected in cases:
+            with self.subTest(given=given):
+                self.assertEqual(qt.to_qwen(given, latin_stress=False), expected)
+
+    def test_qwen_text_puts_latin_stress_on_terms_and_homographs(self):
+        # Roman, 2026-10-30: «выставляй ударения как я понял это самый рабочий вариант» — the stress mark of a homograph
+        # or of Roman's term without a chosen spelling becomes a Latin accented vowel; ordinary words stay plain.
+        spec = importlib.util.spec_from_file_location('qwen_text', ROOT/'scripts/qwen_text.py')
+        qt = importlib.util.module_from_spec(spec); spec.loader.exec_module(qt)
+        A = ACUTE
+        cases = [(f'А из сопла{A} слы{A}шны щелчки{A}.', 'А из соплá слышны щелчки.'),
+                 (f'Обы{A}чные мя{A}гкие сорта{A}.', 'Обычные мягкие сортá.'),
+                 (f'Дли{A}нные воло{A}кна.', 'Длинные волóкна.'),
+                 (f'До{A}ма у себя{A}.', 'Дóма у себя.'),
+                 (f'Ме{A}жду аэмэ{A}с и тулче{A}нджером.', 'Между аэмéс и тулчéнджером.')]   # выбранное Романом написание сильнее
+        for given, expected in cases:
+            with self.subTest(given=given):
+                self.assertEqual(qt.to_qwen(given, latin_stress=True), expected)
+        self.assertEqual(qt.to_qwen(f'Из сопла{A}.', latin_stress=False), 'Из сопла.')
+        # Роман: «во всех словах когда отдаешь текст на озвучку выставлять ударения сразу» — режим 'all'
+        self.assertEqual(qt.to_qwen(f'Пла{A}стик пла{A}вится, а хотэ{A}нд гре{A}ет.', latin_stress='all'), 'Плáстик плáвится, а хотэнд грéет.')
+        self.assertEqual(qt.to_qwen(f'Пла{A}стик.'), 'Плáстик.')   # по умолчанию — во всех словах
+
+    def test_open_at_reads_timestamps_and_runs_quicktime_without_shell(self):
+        # Roman, 2026-10-29: «открывай на нужном тайменге когда вопросы задаешь»
+        spec = importlib.util.spec_from_file_location('open_at', ROOT/'scripts/open_at.py')
+        opener = importlib.util.module_from_spec(spec); spec.loader.exec_module(opener)
+        for text, value in [('13', 13), ('0:13', 13), ('6:53', 413), ('1:02:03', 3723), ('5:48,5', 348)]:
+            with self.subTest(text=text):
+                self.assertEqual(opener.seconds(text), value)
+        for bad in ['', 'a:b', '1:2:3:4', '-5']:
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                opener.seconds(bad)
+        media = self.home/'ролик.mp4'; media.write_bytes(b'x')
+        with patch.object(opener.subprocess, 'run') as run:
+            opener.main([str(media), '6:53'])
+        args = run.call_args.args[0]
+        self.assertEqual(args[0], 'osascript'); self.assertEqual(args[-3:], [str(media.resolve()), '413', 'pause'])
+        with self.assertRaises(SystemExit):
+            opener.main([str(self.home/'нет такого.mp4'), '0:13'])
+
+    def test_qwen_sample_numbers_variants_in_order(self):
+        spec = importlib.util.spec_from_file_location('qwen_sample', ROOT/'scripts/qwen_sample.py')
+        sample = importlib.util.module_from_spec(spec); spec.loader.exec_module(sample)
+        items = sample.plan(['Между {} и тулчéнджером.', '{} подаёт пластик.'], ['аэмéс,аэмээс', 'аэмéс'])
+        self.assertEqual([(i['number'], i['text']) for i in items],
+                         [(1, 'Между аэмéс и тулчéнджером.'), (2, 'Между аэмээс и тулчéнджером.'), (3, 'аэмéс подаёт пластик.')])
+        with self.assertRaises(SystemExit):
+            sample.plan(['без места для слова'], ['аэмéс'])
+
     def test_tts_check_forbidden_form_without_subtitle_word(self):
         errors, _ = self.scenario({'scenes': [{'narration': 'Система меняет нить.', 'tts_text': 'Эйэмэс меняет нить.'}]})
         self.assertTrue(any('эйэмэс' in e for e in errors))

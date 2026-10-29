@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Check the text for speech synthesis against references/proiznoshenie.json before any synthesis.
 
-    python3 scripts/check_tts.py <scenario.json> [more.json ...]
+    python3 scripts/check_tts.py [--qwen] <scenario.json> [more.json ...]
 
 Reads every object with `narration` (what viewers read) and optional `tts_text` (what the voice reads).
 Errors (exit 1, do not synthesize): a correction of Roman's is missing from tts_text, a form he rejected
 appears in the voice text, or a replaced word («головка», «дрыгостолы», «печать нитью») is still used.
 Warnings: suggested forms for names and formats are not used, Latin letters or digits are left in tts_text,
 or a row has no tts_text, so the voice reads the subtitle text and stress marks cannot be applied.
+--qwen (a voice that ignores stress marks, Qwen3-TTS): also lists Roman's terms of the scenario whose spelling for
+that voice he has not approved by ear (no `qwen_heard_ok` in the lexicon) and exits 3 — build ONE numbered sample
+of all of them with scripts/qwen_sample.py before synthesizing the video (Roman, 2026-10-29: «чтобы не тратить
+больше столько времени на каждое слово»).
 """
 import json
 from pathlib import Path
@@ -125,12 +129,30 @@ def check_file(path, lexicon):
     return errors, warnings
 
 
+def unheard_for_qwen(path, lexicon):
+    """Roman's terms used in the scenario whose spelling for Qwen he has not approved by ear yet."""
+    lines = list(rows(json.loads(Path(path).read_text(encoding='utf-8'))))
+    found = {}
+    for e in lexicon:
+        if e['kind'] == 'замена слова' or e['group'] not in STRICT or e.get('qwen_heard_ok'):
+            continue
+        key = key_of(e['written'])
+        count = sum(len(pattern(key).findall(shown)) for _, shown, _ in lines)
+        if count:
+            # without a qwen field the voice gets the stress-marked form with the marks removed
+            found[key] = dict(say=e['say'], qwen=e.get('qwen') or e['say'].replace(ACUTE, ''), count=count)
+    return found
+
+
 def main(argv):
+    qwen = '--qwen' in argv
+    argv = [a for a in argv if a != '--qwen']
     if not argv:
         print(__doc__.strip(), file=sys.stderr)
         return 2
     lexicon = load_lexicon()
     total = 0
+    unheard = {}
     for path in argv:
         try:
             errors, warnings = check_file(path, lexicon)
@@ -143,9 +165,19 @@ def main(argv):
             print('  ОШИБКА ' + line)
         for line in warnings:
             print('  предупреждение ' + line)
+        if qwen:
+            unheard.update(unheard_for_qwen(path, lexicon))
     if total:
         print('Синтез речи не запускать, пока ошибки не исправлены.')
-    return 1 if total else 0
+        return 1
+    if unheard:
+        print('Для голоса без знаков ударения (Qwen) Роман ещё не проверил на слух:')
+        for key, v in unheard.items():
+            print(f'  {key} — нужно «{v["say"]}», голос получает «{v["qwen"]}», в сценарии раз: {v["count"]}')
+        print('До озвучки ролика собрать ОДИН образец всех этих слов (scripts/qwen_sample.py: по 3–4 написания, '
+              'перед каждым номер), дать Роману выбрать номера и записать выбор в словарь: qwen и qwen_heard_ok.')
+        return 3
+    return 0
 
 
 if __name__ == '__main__':
