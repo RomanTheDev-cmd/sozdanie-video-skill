@@ -29,11 +29,12 @@ def rules(lexicon):
         spelling, source = e.get('qwen'), e['say'].replace(ACUTE, '')
         if not spelling:
             continue    # совпадающее написание тоже правило: «пэтджи» и «петджи» приводятся к выбранному
-        body = ''.join('[еэЕЭ]' if ch in 'еэЕЭ' else re.escape(ch) for ch in source)
+        # ищется в размеченном тексте: знак ударения после любой буквы не мешает совпадению
+        body = ''.join(('[еэЕЭ]' if ch in 'еэЕЭ' else re.escape(ch)) + ACUTE + '?' for ch in source)
         # слово на согласную совпадает и в падежных формах (окончание остаётся), на гласную — только целиком
-        tail = '' if source[-1].lower() not in VOWELS else r'(?!\w)'
+        tail = '' if source[-1].lower() not in VOWELS else r'(?![\w' + ACUTE + '])'
         flags = 0 if len(source.replace(' ', '')) <= 2 else re.IGNORECASE   # «И И» — только как написано
-        found.append((len(source), re.compile(r'(?<!\w)' + body + tail, flags), spelling))
+        found.append((len(source), re.compile(r'(?<![\w' + ACUTE + '])' + body + tail, flags), spelling))
     return [(rx, spelling) for _, rx, spelling in sorted(found, key=lambda r: -r[0])]
 
 
@@ -66,17 +67,25 @@ def to_qwen(tts_text, lexicon=None, latin_stress='all'):
     Романа без выбранного написания ударная гласная — латинская буква с ударением (соплá, сортá). Для ролика,
     уже одобренного без этого правила, — latin_stress=False, иначе изменится текст одобренных кусков."""
     lexicon = lexicon if lexicon is not None else load_lexicon()
-    text = tts_text
-    if latin_stress == 'all':
-        # во всех словах; кроме слов, для которых Роман выбрал написание (qwen, в том числе пустое — «хотэнд», «нейлон»)
-        chosen = {w.replace(ACUTE, '').lower() for e in lexicon if 'qwen' in e for w in re.split(r'[ -]', e['say'])}
-        text = re.sub(r'[\w' + ACUTE + ']+', lambda m: m.group(0) if m.group(0).replace(ACUTE, '').lower() in chosen else latinize(m.group(0)), text)
-    elif latin_stress:
-        keep = watched(lexicon)
-        text = re.sub(r'[\w' + ACUTE + ']+', lambda m: latinize(m.group(0)) if m.group(0).replace(ACUTE, '').lower() in keep else m.group(0), text)
-    text = text.replace(ACUTE, '')
+    text, kept = tts_text, []
+
+    def keep(spelling):
+        kept.append(spelling); return f'{len(kept)-1}'
+
+    # 1) выбранные Романом написания — целым названием/фразой, закрыты от дальнейших замен (аудит 2026-10-30, риск 2:
+    #    раньше из ударений выпадали все слова названий, например «один» из «а-один мини», и в обычном тексте)
     for rx, spelling in rules(lexicon):
-        text = rx.sub(lambda m: spelling[0].upper() + spelling[1:] if m.group(0)[0].isupper() else spelling, text)
+        text = rx.sub(lambda m: keep(spelling[0].upper() + spelling[1:] if m.group(0)[0].isupper() else spelling), text)
+    # 2) латинские ударения в остальных словах
+    if latin_stress == 'all':
+        # кроме слов с пустым qwen: «написание не помогает» (нейлон — Роман отверг латиницу)
+        plain = {w.replace(ACUTE, '').lower() for e in lexicon if e.get('qwen') == '' for w in re.split(r'[ -]', e['say'])}
+        text = re.sub(r'[\w' + ACUTE + ']+', lambda m: m.group(0) if m.group(0).replace(ACUTE, '').lower() in plain else latinize(m.group(0)), text)
+    elif latin_stress:
+        watch = watched(lexicon)
+        text = re.sub(r'[\w' + ACUTE + ']+', lambda m: latinize(m.group(0)) if m.group(0).replace(ACUTE, '').lower() in watch else m.group(0), text)
+    text = text.replace(ACUTE, '')
+    text = re.sub('(\\d+)', lambda m: kept[int(m.group(1))], text)
     # предложение начинается с заглавной: модель читает это как начало фразы
     return re.sub(r'(^|[.!?]\s+)([а-яёa-záéíóú])', lambda m: m.group(1) + m.group(2).upper(), text)
 

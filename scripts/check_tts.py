@@ -144,6 +144,27 @@ def unheard_for_qwen(path, lexicon):
     return found
 
 
+def variable_words(path, lexicon):
+    """Words whose stress the voice keeps changing take to take (audit 2026-10-30, risk 1): lexicon entries with
+    `qwen_variable` and the homographs of qwen_text.py. qwen_heard_ok approves a spelling, not every take, so after
+    voicing Roman gets these places to listen to."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('qwen_text', Path(__file__).with_name('qwen_text.py'))
+    qt = importlib.util.module_from_spec(spec); spec.loader.exec_module(qt)
+    lines = list(rows(json.loads(Path(path).read_text(encoding='utf-8'))))
+    found = {}
+    for e in lexicon:
+        if e.get('qwen_variable'):
+            key = key_of(e['written']); count = sum(len(pattern(key).findall(shown)) for _, shown, _ in lines)
+            if count:
+                found[key] = count
+    for word in sorted(qt.HOMOGRAPHS):
+        count = sum(len(re.findall(r'(?<!\w)' + word + r'(?!\w)', plain(shown))) for _, shown, _ in lines)
+        if count:
+            found[word] = count
+    return found
+
+
 def main(argv):
     qwen = '--qwen' in argv
     argv = [a for a in argv if a != '--qwen']
@@ -152,7 +173,7 @@ def main(argv):
         return 2
     lexicon = load_lexicon()
     total = 0
-    unheard = {}
+    unheard, variable = {}, {}
     for path in argv:
         try:
             errors, warnings = check_file(path, lexicon)
@@ -167,9 +188,13 @@ def main(argv):
             print('  предупреждение ' + line)
         if qwen:
             unheard.update(unheard_for_qwen(path, lexicon))
+            variable.update(variable_words(path, lexicon))
     if total:
         print('Синтез речи не запускать, пока ошибки не исправлены.')
         return 1
+    if variable:
+        print('Ударение в этих словах голос ставит то так, то так — после озвучки дать Роману послушать их места '
+              '(open_at.py, время — по .srt итога): ' + ', '.join(f'{k} ×{n}' for k, n in variable.items()))
     if unheard:
         print('Для голоса без знаков ударения (Qwen) Роман ещё не проверил на слух:')
         for key, v in unheard.items():

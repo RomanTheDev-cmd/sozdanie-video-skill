@@ -304,6 +304,36 @@ class EntryChecks(unittest.TestCase):
         self.assertEqual(qt.to_qwen(f'Пла{A}стик пла{A}вится, а хотэ{A}нд гре{A}ет.', latin_stress='all'), 'Плáстик плáвится, а хотэнд грéет.')
         self.assertEqual(qt.to_qwen(f'Пла{A}стик.'), 'Плáстик.')   # по умолчанию — во всех словах
 
+    def test_qwen_text_all_keeps_common_words_of_terms(self):
+        # аудит 2026-10-30, риск 2: слова, входящие в название из словаря («один» в «а-один мини»), в обычном тексте
+        # тоже получают ударение; выбранное написание действует только на само название
+        spec = importlib.util.spec_from_file_location('qwen_text', ROOT/'scripts/qwen_text.py')
+        qt = importlib.util.module_from_spec(spec); spec.loader.exec_module(qt)
+        A = ACUTE
+        cases = [(f'Оди{A}н из при{A}нтеров.', 'Одíн из прíнтеров.'),
+                 (f'Програ{A}мма подгото{A}вки печа{A}ти.', 'Прогрáмма подготóвки печáти.'),
+                 (f'бамбу лаб а-оди{A}н ми{A}ни и а-два-эл.', 'Бамбу лаб аодинмини и адваэл.'),
+                 (f'Тэпэу{A} и нейло{A}н.', f'Тэпэу{A}у и нейлон.'),     # выбранное написание; нейлон — пустое qwen
+                 (f'В э{A}том ви{A}део говори{A}м об эфдээм-печа{A}ти.', 'В э́том вíдео говорим об эфдээм-печати.'.replace('э́', 'é'))]
+        for given, expected in cases:
+            with self.subTest(given=given):
+                self.assertEqual(qt.to_qwen(given, latin_stress='all'), expected)
+        # прежний режим не меняется
+        self.assertEqual(qt.to_qwen(f'бамбу лаб а-оди{A}н ми{A}ни.', latin_stress=False), 'Бамбу лаб аодинмини.')
+
+    def test_qwen_check_reminds_variable_words(self):
+        # аудит 2026-10-30, риск 1: qwen_heard_ok — «написание проверено», не «каждая озвучка верна»
+        lexicon = self.QWEN_LEXICON + [dict(written='тулченджер', say='тулче́нджер', kind='произношение', group='Правки Романа', note='',
+                                            source='Роман', qwen='тулчéнджер', qwen_heard_ok='Роман', qwen_variable=True)]
+        path = self.home/'scenario.json'
+        path.write_text(json.dumps([{'narration': 'Тулченджер и хотэнд. Из сопла слышны щелчки.', 'tts_text': 'Тулче́нджер и хотэ́нд. Из сопла́ слы́шны щелчки́.'}],
+                                   ensure_ascii=False), encoding='utf-8')
+        self.assertEqual(sorted(checker.variable_words(path, lexicon)), ['сопла', 'тулченджер'])
+        with patch.object(checker, 'load_lexicon', return_value=lexicon):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(checker.main(['--qwen', str(path)]), 0)   # напоминание не запрещает синтез
+        self.assertIn('тулченджер', out.getvalue()); self.assertIn('open_at.py', out.getvalue())
+
     def test_open_at_reads_timestamps_and_runs_quicktime_without_shell(self):
         # Roman, 2026-10-29: «открывай на нужном тайменге когда вопросы задаешь»
         spec = importlib.util.spec_from_file_location('open_at', ROOT/'scripts/open_at.py')
