@@ -46,7 +46,7 @@ def main(argv=None):
         if result or args.mode=='check-entrypoint':return result
     engine=resolve_engine();runtime=runtime_root()
     if args.mode=='status':
-        result={'interface':'Создание видео','interface_version':(Path(__file__).resolve().parents[1]/'VERSION').read_text().strip(),'engine_root':str(engine),'engine_version':(engine/'VERSION').read_text().strip(),'engine_points_to_skill':'sozdanie-video' in (engine/'ENGINE.md').read_text(encoding='utf-8'),'runtime':str(runtime),'python_available':{env:(runtime/env/'bin/python').is_file() for env in ['.venv','.venv-audio','.venv-qwen']},'render_started':False,'voice_synthesis_started':False,'limits':['Path/version inventory is not rendering or listening assessment.']}
+        result={'interface':'Создание видео','interface_version':(Path(__file__).resolve().parents[1]/'VERSION').read_text().strip(),'engine_root':str(engine),'engine_version':(engine/'VERSION').read_text().strip(),'engine_points_to_skill':'sozdanie-video' in (engine/'ENGINE.md').read_text(encoding='utf-8'),'runtime':str(runtime),'python_available':{env:(runtime/env/'bin/python').is_file() for env in ['.venv','.venv-audio','.venv-asr','.venv-tts-comparison']},'render_started':False,'voice_synthesis_started':False,'limits':['Path/version inventory is not rendering or listening assessment.']}
         print(json.dumps(result,ensure_ascii=False,indent=2));return 0
     environment='.venv-audio' if args.mode=='check-audio' else '.venv'
     python=runtime/environment/'bin/python'
