@@ -243,7 +243,7 @@ class EntryChecks(unittest.TestCase):
 
     def test_tts_check_accepts_roman_forms(self):
         errors, _ = self.scenario([{'narration': 'Для начала хватит PLA. Bambu Lab A1 mini — это дрыгостол; такие дрыги постепенно стали популярны. AMS меняет пластик, а хотэнд его плавит. Голова принтера движется по оси Y. С вами был ИИ-ассистент.',
-                                    'tts_text': 'Для нача́ла хва́тит пээла́. Бамбу Лаб а-оди́н ми́ни — э́то дрыгосто́л; таки́е дрыги постепе́нно ста́ли популя́рны. Аэмэ́с меня́ет пла́стик, а хотэ́нд ево́ пла́вит. Голова́ при́нтера дви́жется по оси́ и́грик. С ва́ми был И И ассисте́нт.'}])
+                                    'tts_text': 'Для нача́ла хва́тит пээла́. Бамбу Лаб а-оди́н ми́ни, э́то дрыгосто́л; таки́е дрыги постепе́нно ста́ли популя́рны. Аэмэ́с меня́ет пла́стик, а хотэ́нд ево́ пла́вит. Голова́ при́нтера дви́жется по оси́ и́грик. С ва́ми был И И ассисте́нт.'}])
         self.assertEqual(errors, [])
 
     def test_tts_ego_uses_phonetic_v(self):
@@ -260,6 +260,32 @@ class EntryChecks(unittest.TestCase):
 
 
 
+
+    def test_tts_marks_missing_from_tera_vocabulary_are_errors(self):
+        # Claude, 2026-11-09: Tera молча выбрасывает «—», «–», «…» (их нет в unicode_indexer.json модели);
+        # в ролике о безопасности «двухсот — трёхсот» сливалось. В субтитрах знак допустим.
+        for mark in ['—', '–', '…']:
+            with self.subTest(mark=mark):
+                errors, _ = self.scenario([{'narration': 'Стол — горячее место.',
+                                            'tts_text': f'Стол {mark} горя́чее ме́сто.'}])
+                self.assertTrue(any('«' + mark + '»' in e for e in errors), errors)
+        errors, _ = self.scenario([{'narration': 'Стол — горячее место. Примерно 200–300 градусов…',
+                                    'tts_text': 'Стол, горя́чее ме́сто. Приме́рно двухсо́т, трёхсо́т гра́дусов.'}])
+        self.assertEqual(errors, [])
+        errors, _ = self.scenario({'scenes': [{'narration': 'Сядьте удобно — и отпустите напряжение.'}]})
+        self.assertEqual(errors, [])
+
+    def test_tts_stress_on_monosyllable_warns(self):
+        # RUAccent ставит знак и на предлоги/частицы («и́з», «не́»); в тексте для голоса его снимают.
+        errors, warnings = self.scenario([{'narration': 'Вынимаем вилку из розетки и не трогаем.',
+                                           'tts_text': 'Вынима́ем ви́лку и́з розе́тки и не́ тро́гаем.'}])
+        self.assertEqual(errors, [])
+        text = '\n'.join(warnings)
+        self.assertIn('и́з', text); self.assertIn('не́', text)
+        self.assertNotIn('ви́лку', text)
+        _, warnings = self.scenario([{'narration': 'Вынимаем вилку из розетки и не трогаем.',
+                                      'tts_text': 'Вынима́ем ви́лку из розе́тки и не тро́гаем.'}])
+        self.assertFalse([w for w in warnings if 'односложн' in w], warnings)
 
     def test_retired_backend_flag_stops_before_reading_or_synthesis(self):
         with patch.object(checker, 'load_lexicon', side_effect=AssertionError('No work for retired options')), contextlib.redirect_stderr(io.StringIO()):
@@ -295,7 +321,7 @@ class EntryChecks(unittest.TestCase):
     def test_tts_check_accepts_spelling_and_punctuation_variants(self):
         # Roman gave no stress for PETG/ABS; Codex wrote «пэтджи́», «абээ́с»; «И. И,» is the separate letters he asked for.
         errors, _ = self.scenario([{'narration': 'PETG и ABS. Технологии — печать нитью и смолой. В этом видео говорим об FDM-печати. С вами был ИИ-ассистент 3D Magic.',
-                                    'tts_text': 'Пэтджи́ и абээ́с. Техноло́гии — печа́ть ни́тью и смоло́й. В э́том ви́део говори́м об эфдээ́м-печа́ти. С ва́ми был И. И, ассисте́нт три дэ мэ́джик.'}])
+                                    'tts_text': 'Пэтджи́ и абээ́с. Техноло́гии, печа́ть ни́тью и смоло́й. В э́том ви́део говори́м об эфдээ́м-печа́ти. С ва́ми был И. И, ассисте́нт три дэ мэ́джик.'}])
         self.assertEqual(errors, [])
 
     def test_tts_check_rejected_phrase_about_fdm(self):

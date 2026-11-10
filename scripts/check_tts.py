@@ -14,6 +14,10 @@ ACUTE = '́'
 STRICT = {'Правки Романа', 'Выведено из правок Романа'}
 SUGGESTED = {'3D-печать: названия, модели, форматы'}
 LETTER = r'[\w' + ACUTE + ']'
+# Знаков нет в словаре символов Tera (unicode_indexer.json): модель молча их выбрасывает, пауза пропадает
+# («двухсот — трёхсот» сливается). Claude, 2026-11-09, ролик «Меры безопасности в FDM-печати».
+TERA_SKIPS = {'—': 'длинное тире', '–': 'короткое тире', '…': 'многоточие'}
+VOWELS = set('аеёиоуыэюя')
 
 
 def load_lexicon(path=None):
@@ -105,6 +109,15 @@ def check_text(where, shown, spoken, lexicon):
             warnings.append(f'{where}: латиница в тексте для голоса: {", ".join(latin)} — записать по-русски')
         if re.search(r'\d', spoken):
             warnings.append(f'{where}: цифры в тексте для голоса — записать словами')
+        for mark, name in TERA_SKIPS.items():
+            if mark in spoken:
+                errors.append(f'{where}: в тексте для голоса знак «{mark}» ({name}) — Tera его молча пропускает, '
+                              f'пауза пропадает; заменить запятой, двоеточием или точкой (в субтитрах можно оставить)')
+        single = sorted({w for w in re.findall('[А-Яа-яЁё' + ACUTE + ']+', spoken)
+                         if ACUTE in w and sum(c in VOWELS for c in w.lower()) == 1})
+        if single:
+            warnings.append(f'{where}: знак ударения на односложном слове: {", ".join(single)} — снять '
+                            f'(RUAccent ставит его и на предлоги, частицы)')
     return errors, warnings
 
 
